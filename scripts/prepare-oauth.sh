@@ -25,9 +25,12 @@ mkdir -p "$CLAUDE_DIR"
 # Создаем файл credentials.json в формате, который ожидает Claude Code
 cat > "$CLAUDE_DIR/.credentials.json" << EOF
 {
-  "access_token": "$CLAUDE_ACCESS_TOKEN",
-  "refresh_token": "$CLAUDE_REFRESH_TOKEN",
-  "expires_at": "$CLAUDE_EXPIRES_AT"
+  "claudeAiOauth": {
+    "accessToken": "$CLAUDE_ACCESS_TOKEN",
+    "refreshToken": "$CLAUDE_REFRESH_TOKEN",
+    "expiresAt": "$CLAUDE_EXPIRES_AT",
+    "scopes": ["user:inference", "user:profile"]
+  }
 }
 EOF
 

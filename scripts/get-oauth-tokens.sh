@@ -38,14 +38,31 @@ echo ""
 # Читаем и форматируем JSON
 if command -v jq &> /dev/null; then
     # Если есть jq, используем его для красивого вывода
-    ACCESS_TOKEN=$(jq -r '.access_token' "$CRED_FILE")
-    REFRESH_TOKEN=$(jq -r '.refresh_token' "$CRED_FILE")
-    EXPIRES_AT=$(jq -r '.expires_at' "$CRED_FILE")
+    # Проверяем формат файла
+    if jq -e '.claudeAiOauth' "$CRED_FILE" > /dev/null 2>&1; then
+        # Формат Claude AI OAuth
+        ACCESS_TOKEN=$(jq -r '.claudeAiOauth.accessToken' "$CRED_FILE")
+        REFRESH_TOKEN=$(jq -r '.claudeAiOauth.refreshToken' "$CRED_FILE")
+        EXPIRES_AT=$(jq -r '.claudeAiOauth.expiresAt' "$CRED_FILE")
+    else
+        # Старый формат (если есть)
+        ACCESS_TOKEN=$(jq -r '.access_token' "$CRED_FILE")
+        REFRESH_TOKEN=$(jq -r '.refresh_token' "$CRED_FILE")
+        EXPIRES_AT=$(jq -r '.expires_at' "$CRED_FILE")
+    fi
 else
     # Иначе используем grep
-    ACCESS_TOKEN=$(grep -o '"access_token":\s*"[^"]*"' "$CRED_FILE" | cut -d'"' -f4)
-    REFRESH_TOKEN=$(grep -o '"refresh_token":\s*"[^"]*"' "$CRED_FILE" | cut -d'"' -f4)
-    EXPIRES_AT=$(grep -o '"expires_at":\s*"[^"]*"' "$CRED_FILE" | cut -d'"' -f4)
+    # Ищем в формате claudeAiOauth
+    ACCESS_TOKEN=$(grep -o '"accessToken":\s*"[^"]*"' "$CRED_FILE" | cut -d'"' -f4)
+    REFRESH_TOKEN=$(grep -o '"refreshToken":\s*"[^"]*"' "$CRED_FILE" | cut -d'"' -f4)
+    EXPIRES_AT=$(grep -o '"expiresAt":\s*"[^"]*"' "$CRED_FILE" | cut -d'"' -f4)
+    
+    # Если не нашли, пробуем старый формат
+    if [ -z "$ACCESS_TOKEN" ]; then
+        ACCESS_TOKEN=$(grep -o '"access_token":\s*"[^"]*"' "$CRED_FILE" | cut -d'"' -f4)
+        REFRESH_TOKEN=$(grep -o '"refresh_token":\s*"[^"]*"' "$CRED_FILE" | cut -d'"' -f4)
+        EXPIRES_AT=$(grep -o '"expires_at":\s*"[^"]*"' "$CRED_FILE" | cut -d'"' -f4)
+    fi
 fi
 
 echo "CLAUDE_ACCESS_TOKEN:"
@@ -57,6 +74,24 @@ echo ""
 echo "CLAUDE_EXPIRES_AT:"
 echo "$EXPIRES_AT"
 echo ""
+
+# Проверяем срок действия токена
+if [ -n "$EXPIRES_AT" ]; then
+    CURRENT_TIME=$(date +%s)
+    EXPIRES_AT_SEC=$(date -d "$EXPIRES_AT" +%s 2>/dev/null || echo "0")
+    
+    if [ "$EXPIRES_AT_SEC" -lt "$CURRENT_TIME" ]; then
+        echo "⚠️  ВНИМАНИЕ: Токен истек! Необходимо обновить через /login"
+        echo ""
+    else
+        # Вычисляем оставшееся время
+        REMAINING_SEC=$((EXPIRES_AT_SEC - CURRENT_TIME))
+        REMAINING_DAYS=$((REMAINING_SEC / 86400))
+        echo "✅ Токен действителен еще $REMAINING_DAYS дней"
+        echo ""
+    fi
+fi
+
 echo "📝 Инструкции по добавлению в GitHub:"
 echo "===================================="
 echo ""

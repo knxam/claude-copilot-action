@@ -52,9 +52,12 @@ cat ~/.claude/.credentials.json
 
 # Вы увидите что-то вроде:
 {
-  "access_token": "eyJ0eXAiOiJKV1...",
-  "refresh_token": "def50200c8e9...",
-  "expires_at": "2024-12-31T23:59:59Z"
+  "claudeAiOauth": {
+    "accessToken": "eyJ0eXAiOiJKV1...",
+    "refreshToken": "def50200c8e9...",
+    "expiresAt": "2024-12-31T23:59:59Z",
+    "scopes": ["user:inference", "user:profile"]
+  }
 }
 ```
 
@@ -64,9 +67,9 @@ cat ~/.claude/.credentials.json
 2. Перейдите в **Settings** → **Secrets and variables** → **Actions**
 3. Нажмите **New repository secret**
 4. Добавьте три секрета:
-   - Имя: `CLAUDE_ACCESS_TOKEN`, Значение: (ваш access_token)
-   - Имя: `CLAUDE_REFRESH_TOKEN`, Значение: (ваш refresh_token)
-   - Имя: `CLAUDE_EXPIRES_AT`, Значение: (ваш expires_at)
+   - Имя: `CLAUDE_ACCESS_TOKEN`, Значение: (ваш accessToken)
+   - Имя: `CLAUDE_REFRESH_TOKEN`, Значение: (ваш refreshToken)
+   - Имя: `CLAUDE_EXPIRES_AT`, Значение: (строка expiresAt, например "2024-12-31T23:59:59Z")
 
 ### Шаг 4: Настройте workflow
 
