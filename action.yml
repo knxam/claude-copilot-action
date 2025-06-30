@@ -332,7 +332,7 @@ runs:
         CLAUDE_CODE_ACTION: "1"
         INPUT_PROMPT_FILE: ${{ steps.prepare_prompt.outputs.prompt_file }}
         INPUT_MODEL: ${{ inputs.model }}
-        INPUT_ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+        # INPUT_ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
         INPUT_USE_OAUTH: ${{ inputs.use_oauth }}
         INPUT_CLAUDE_ACCESS_TOKEN: ${{ inputs.claude_access_token }}
         INPUT_CLAUDE_REFRESH_TOKEN: ${{ inputs.claude_refresh_token }}
