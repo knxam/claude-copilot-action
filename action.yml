@@ -123,6 +123,9 @@ runs:
       shell: bash
       run: |
         echo "🔍 Checking triggers..."
+        echo "Event name: ${{ github.event_name }}"
+        echo "Event action: ${{ github.event.action }}"
+        
         SHOULD_RUN="false"
         TRIGGER_TYPE=""
         
@@ -137,10 +140,6 @@ runs:
             SHOULD_RUN="true"
             TRIGGER_TYPE="review"
           fi
-        elif [[ "${{ github.event_name }}" == "issues" ]] && [[ "${{ github.event.action }}" == "labeled" ]]; then
-          # Пропускаем - вебхук уже обработает это событие
-          echo "⏭️ Label event will be handled by webhook, skipping direct processing"
-          SHOULD_RUN="false"
         elif [[ "${{ github.event_name }}" == "issues" ]] && [[ "${{ github.event.action }}" == "assigned" ]]; then
           if [[ "${{ github.event.assignee.login }}" == "${{ inputs.assignee_trigger }}" ]]; then
             SHOULD_RUN="true"
