@@ -319,14 +319,15 @@ runs:
       with:
         prompt_file: ${{ steps.prepare_prompt.outputs.prompt_file }}
         model: ${{ inputs.model }}
-        anthropic_api_key: ${{ inputs.use_oauth == 'true' && '' || inputs.anthropic_api_key }}
+        anthropic_api_key: ${{ inputs.use_oauth == 'true' && 'oauth-placeholder' || inputs.anthropic_api_key }}
         use_bedrock: ${{ inputs.use_bedrock }}
         use_vertex: ${{ inputs.use_vertex }}
-        github_token: ${{ inputs.github_token }}
         max_turns: ${{ inputs.max_turns }}
         timeout_minutes: ${{ inputs.timeout_minutes }}
         allowed_tools: ${{ inputs.allowed_tools }}
         claude_env: ${{ inputs.claude_env }}
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.use_oauth == 'true' && 'oauth-placeholder' || inputs.anthropic_api_key }}
         
     - name: Post completion comment
       if: steps.check_triggers.outputs.should_run == 'true' && success()
