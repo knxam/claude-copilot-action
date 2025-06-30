@@ -118,6 +118,24 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Debug event info
+      shell: bash
+      run: |
+        echo "🔍 DEBUG: Action triggered"
+        echo "Event: ${{ github.event_name }}"
+        echo "Action: ${{ github.event.action }}"
+        echo "Workflow: ${{ github.workflow }}"
+        echo "Trigger actor: ${{ github.actor }}"
+        if [[ "${{ github.event_name }}" == "issues" ]]; then
+          echo "Issue number: ${{ github.event.issue.number }}"
+          echo "Issue title: ${{ github.event.issue.title }}"
+          echo "Label: ${{ github.event.label.name }}"
+        elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          echo "PR number: ${{ github.event.pull_request.number }}"
+          echo "PR title: ${{ github.event.pull_request.title }}"
+          echo "PR body: ${{ github.event.pull_request.body }}"
+        fi
+        
     - name: Check triggers
       id: check_triggers
       shell: bash
