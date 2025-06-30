@@ -1,0 +1,166 @@
+name: Claude Copilot Agent
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write  # Необходимо для OIDC аутентификации
+
+jobs:
+  claude-agent:
+    # Запускается если:
+    # 1. Открыт PR с текстом "labeling issue #" (от webhook)
+    # 2. Создан комментарий в PR с упоминанием @claude
+    if: |
+      (github.event_name == 'pull_request' && 
+       contains(github.event.pull_request.body, 'labeling issue #')) ||
+      (github.event_name == 'issue_comment' && 
+       github.event.issue.pull_request &&
+       contains(github.event.comment.body, '@claude'))
+    
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Проверяем ветку PR, а не базовую ветку
+          ref: ${{ github.event.pull_request.head.ref || github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up environment
+        run: |
+          # Извлекаем информацию из PR или комментария
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Для нового PR извлекаем номер issue из описания
+            ISSUE_NUMBER=$(echo "${{ github.event.pull_request.body }}" | grep -oP 'issue #\K\d+')
+            echo "ISSUE_NUMBER=$ISSUE_NUMBER" >> $GITHUB_ENV
+            echo "TRIGGER_TYPE=pr_opened" >> $GITHUB_ENV
+            echo "BRANCH_NAME=${{ github.event.pull_request.head.ref }}" >> $GITHUB_ENV
+          else
+            # Для комментария
+            echo "TRIGGER_TYPE=comment" >> $GITHUB_ENV
+            echo "BRANCH_NAME=${{ github.head_ref }}" >> $GITHUB_ENV
+            # Получаем номер PR из контекста
+            echo "PR_NUMBER=${{ github.event.issue.number }}" >> $GITHUB_ENV
+          fi
+
+      - name: Add eyes reaction
+        if: env.TRIGGER_TYPE == 'pr_opened'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Добавляем реакцию глаза к PR при первом запуске
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '👀 Claude is analyzing the task...'
+            });
+
+      - name: Prepare Claude prompt
+        id: prepare_prompt
+        run: |
+          # Подготавливаем контекст для Claude
+          if [ "${{ env.TRIGGER_TYPE }}" = "pr_opened" ]; then
+            # Для нового PR получаем информацию об issue
+            PROMPT="You are working on a PR that was created for issue #${{ env.ISSUE_NUMBER }}.
+            
+            Please analyze the issue and implement the required changes.
+            
+            PR Description: ${{ github.event.pull_request.body }}
+            
+            Instructions:
+            1. First, fetch and read the issue #${{ env.ISSUE_NUMBER }} to understand the requirements
+            2. Implement the necessary changes
+            3. Commit your changes with descriptive messages
+            4. Provide a summary of what you've done"
+          else
+            # Для комментария
+            PROMPT="You are working on an existing PR. A new comment was posted:
+            
+            Comment by @${{ github.event.comment.user.login }}:
+            ${{ github.event.comment.body }}
+            
+            Please respond to this comment and make any requested changes.
+            Remember to work in the existing PR branch: ${{ env.BRANCH_NAME }}"
+          fi
+          
+          # Сохраняем prompt в файл для передачи в Claude
+          echo "$PROMPT" > /tmp/claude_prompt.txt
+          echo "prompt_file=/tmp/claude_prompt.txt" >> $GITHUB_OUTPUT
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-base-action@beta
+        with:
+          prompt_file: ${{ steps.prepare_prompt.outputs.prompt_file }}
+          # Разрешаем Claude использовать git, читать файлы и работать с GitHub
+          allowed_tools: |
+            Bash(git:*),
+            View,
+            Edit,
+            GlobTool,
+            GrepTool,
+            BatchTool,
+            mcp__github_file_ops__read_file,
+            mcp__github_file_ops__commit_files,
+            mcp__github_file_ops__update_claude_comment,
+            mcp__github_file_ops__get_issue,
+            mcp__github_file_ops__list_issues,
+            mcp__github_file_ops__get_pull_request,
+            mcp__github_file_ops__list_pull_requests
+          
+          # Настройки модели
+          model: claude-3-5-sonnet-20241022
+          max_turns: 20
+          timeout_minutes: 30
+          
+          # Аутентификация (выберите один из вариантов)
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # use_bedrock: true  # Для AWS Bedrock
+          # use_vertex: true   # Для Google Vertex
+          
+          # GitHub токен для работы с API
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          
+          # Дополнительные инструкции
+          custom_instructions: |
+            You are working on the PR branch: ${{ env.BRANCH_NAME }}
+            Always commit directly to this branch.
+            When making commits, use clear, descriptive commit messages.
+            After completing tasks, update the PR comment with a summary of changes.
+
+      - name: Post completion comment
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const timestamp = new Date().toISOString();
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `✅ Claude has completed the task at ${timestamp}\n\n[View workflow run](${runUrl})`
+            });
+
+      - name: Handle errors
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `❌ Claude encountered an error. Please check the [workflow logs](${runUrl}) for details.`
+            });

@@ -1,0 +1,415 @@
+name: 'Claude Copilot Action'
+description: 'GitHub Action для интеграции Claude Code с GitHub Issues и Pull Requests через систему лейблов'
+author: 'Your Name'
+
+branding:
+  icon: 'cpu'
+  color: 'purple'
+
+inputs:
+  anthropic_api_key:
+    description: 'Anthropic API key (required for direct API)'
+    required: false
+  
+  use_oauth:
+    description: 'Use Claude AI OAuth authentication instead of API key (for Claude Max subscribers)'
+    required: false
+    default: 'false'
+  
+  claude_access_token:
+    description: 'Claude AI OAuth access token (required when use_oauth is true)'
+    required: false
+  
+  claude_refresh_token:
+    description: 'Claude AI OAuth refresh token (required when use_oauth is true)'
+    required: false
+  
+  claude_expires_at:
+    description: 'Claude AI OAuth token expiration timestamp (required when use_oauth is true)'
+    required: false
+  
+  github_token:
+    description: 'GitHub token with repo and pull request permissions'
+    required: false
+    default: ${{ github.token }}
+  
+  trigger_phrase:
+    description: 'The trigger phrase to look for in comments'
+    required: false
+    default: '@claude'
+  
+  assignee_trigger:
+    description: 'The assignee username that triggers the action (e.g. claude)'
+    required: false
+  
+  label_trigger:
+    description: 'The label that triggers the action'
+    required: false
+    default: 'claude'
+  
+  model:
+    description: 'Claude model to use'
+    required: false
+    default: 'claude-3-5-sonnet-20241022'
+  
+  max_turns:
+    description: 'Maximum number of conversation turns'
+    required: false
+    default: '20'
+  
+  timeout_minutes:
+    description: 'Timeout in minutes for execution'
+    required: false
+    default: '30'
+  
+  allowed_tools:
+    description: 'Tools that Claude can use (pipe-separated list)'
+    required: false
+    default: |
+      Bash(git:*),
+      View,
+      Edit,
+      GlobTool,
+      GrepTool,
+      BatchTool
+  
+  custom_instructions:
+    description: 'Additional custom instructions for Claude'
+    required: false
+    default: ''
+  
+  claude_env:
+    description: 'Custom environment variables to pass to Claude (YAML format)'
+    required: false
+    default: ''
+  
+  use_bedrock:
+    description: 'Use Amazon Bedrock instead of direct API'
+    required: false
+    default: 'false'
+  
+  use_vertex:
+    description: 'Use Google Vertex AI instead of direct API'
+    required: false
+    default: 'false'
+  
+  base_branch:
+    description: 'Base branch for creating new branches (defaults to repository default)'
+    required: false
+  
+  branch_prefix:
+    description: 'Prefix for Claude branches'
+    required: false
+    default: 'claude/'
+
+outputs:
+  execution_file:
+    description: 'Path to the Claude execution output file'
+    value: ${{ steps.claude.outputs.execution_file }}
+  
+  conclusion:
+    description: 'Conclusion of the Claude execution (success/failure)'
+    value: ${{ steps.claude.outputs.conclusion }}
+  
+  branch_name:
+    description: 'Name of the branch created or used'
+    value: ${{ steps.determine_context.outputs.branch_name }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check triggers
+      id: check_triggers
+      shell: bash
+      run: |
+        echo "🔍 Checking triggers..."
+        SHOULD_RUN="false"
+        TRIGGER_TYPE=""
+        
+        # Check for different trigger types
+        if [[ "${{ github.event_name }}" == "issue_comment" ]] || [[ "${{ github.event_name }}" == "pull_request_review_comment" ]]; then
+          if [[ "${{ github.event.comment.body }}" == *"${{ inputs.trigger_phrase }}"* ]]; then
+            SHOULD_RUN="true"
+            TRIGGER_TYPE="comment"
+          fi
+        elif [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
+          if [[ "${{ github.event.review.body }}" == *"${{ inputs.trigger_phrase }}"* ]]; then
+            SHOULD_RUN="true"
+            TRIGGER_TYPE="review"
+          fi
+        elif [[ "${{ github.event_name }}" == "issues" ]] && [[ "${{ github.event.action }}" == "labeled" ]]; then
+          if [[ "${{ github.event.label.name }}" == "${{ inputs.label_trigger }}" ]]; then
+            SHOULD_RUN="true"
+            TRIGGER_TYPE="label"
+          fi
+        elif [[ "${{ github.event_name }}" == "issues" ]] && [[ "${{ github.event.action }}" == "assigned" ]]; then
+          if [[ "${{ github.event.assignee.login }}" == "${{ inputs.assignee_trigger }}" ]]; then
+            SHOULD_RUN="true"
+            TRIGGER_TYPE="assignee"
+          fi
+        elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          # Check if this is a PR created by our webhook
+          if [[ "${{ github.event.pull_request.body }}" == *"labeling issue #"* ]]; then
+            SHOULD_RUN="true"
+            TRIGGER_TYPE="webhook_pr"
+          fi
+        fi
+        
+        echo "should_run=$SHOULD_RUN" >> $GITHUB_OUTPUT
+        echo "trigger_type=$TRIGGER_TYPE" >> $GITHUB_OUTPUT
+        
+        if [[ "$SHOULD_RUN" == "true" ]]; then
+          echo "✅ Trigger detected: $TRIGGER_TYPE"
+        else
+          echo "⏭️ No trigger found, skipping..."
+        fi
+
+    - name: Determine context
+      id: determine_context
+      if: steps.check_triggers.outputs.should_run == 'true'
+      shell: bash
+      run: |
+        echo "📋 Determining context..."
+        
+        # Initialize variables
+        ISSUE_NUMBER=""
+        PR_NUMBER=""
+        BRANCH_NAME=""
+        IS_NEW_TASK="false"
+        
+        # Determine context based on event
+        if [[ "${{ github.event_name }}" == "issues" ]]; then
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          IS_NEW_TASK="true"
+          # Generate branch name for new issue
+          ISSUE_TITLE="${{ github.event.issue.title }}"
+          SAFE_TITLE=$(echo "$ISSUE_TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
+          # Truncate to reasonable length
+          SAFE_TITLE=${SAFE_TITLE:0:30}
+          BRANCH_NAME="${{ inputs.branch_prefix }}issue-${ISSUE_NUMBER}-${SAFE_TITLE}-1"
+        elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
+          # Extract issue number from PR body if it's from webhook
+          if [[ "${{ steps.check_triggers.outputs.trigger_type }}" == "webhook_pr" ]]; then
+            ISSUE_NUMBER=$(echo "${{ github.event.pull_request.body }}" | grep -oP 'issue #\K\d+' || echo "")
+          fi
+        elif [[ "${{ github.event_name }}" == "issue_comment" ]] || [[ "${{ github.event_name }}" == "pull_request_review_comment" ]]; then
+          if [[ -n "${{ github.event.issue.pull_request }}" ]]; then
+            PR_NUMBER="${{ github.event.issue.number }}"
+            # We need to fetch the PR to get the branch name
+            echo "Fetching PR details..."
+          else
+            ISSUE_NUMBER="${{ github.event.issue.number }}"
+            IS_NEW_TASK="true"
+          fi
+        fi
+        
+        echo "issue_number=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
+        echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+        echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+        echo "is_new_task=$IS_NEW_TASK" >> $GITHUB_OUTPUT
+
+    - name: Create branch and PR (if needed)
+      id: create_pr
+      if: steps.check_triggers.outputs.should_run == 'true' && steps.determine_context.outputs.is_new_task == 'true'
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github_token }}
+        script: |
+          const issueNumber = '${{ steps.determine_context.outputs.issue_number }}';
+          const branchName = '${{ steps.determine_context.outputs.branch_name }}';
+          const baseBranch = '${{ inputs.base_branch }}' || github.context.payload.repository.default_branch;
+          
+          console.log(`📝 Creating branch and PR for issue #${issueNumber}`);
+          
+          try {
+            // Add eyes reaction to issue
+            await github.rest.reactions.createForIssue({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: parseInt(issueNumber),
+              content: 'eyes'
+            });
+            
+            // Get base branch SHA
+            const { data: ref } = await github.rest.git.getRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: `heads/${baseBranch}`
+            });
+            
+            // Create new branch
+            await github.rest.git.createRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: `refs/heads/${branchName}`,
+              sha: ref.object.sha
+            });
+            
+            // Create empty commit
+            const { data: baseCommit } = await github.rest.git.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: ref.object.sha
+            });
+            
+            const { data: newCommit } = await github.rest.git.createCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              message: `chore: initial commit for issue #${issueNumber}`,
+              tree: baseCommit.tree.sha,
+              parents: [ref.object.sha]
+            });
+            
+            // Update branch
+            await github.rest.git.updateRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: `heads/${branchName}`,
+              sha: newCommit.sha,
+              force: true
+            });
+            
+            // Create PR
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Claude working on: ${context.payload.issue.title}`,
+              head: branchName,
+              base: baseBranch,
+              body: `🤖 This PR was automatically created by Claude in response to issue #${issueNumber}\n\nClaude is working on implementing the requested changes.`
+            });
+            
+            console.log(`✅ Created PR #${pr.number}`);
+            core.setOutput('pr_number', pr.number);
+            
+          } catch (error) {
+            console.error('Error creating branch/PR:', error);
+            throw error;
+          }
+
+    - name: Checkout repository
+      if: steps.check_triggers.outputs.should_run == 'true'
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ steps.determine_context.outputs.branch_name }}
+        token: ${{ inputs.github_token }}
+
+    - name: Prepare prompt
+      id: prepare_prompt
+      if: steps.check_triggers.outputs.should_run == 'true'
+      shell: bash
+      run: |
+        echo "📝 Preparing prompt for Claude..."
+        
+        PROMPT=""
+        
+        # Different prompts based on trigger type
+        case "${{ steps.check_triggers.outputs.trigger_type }}" in
+          "label"|"assignee"|"webhook_pr")
+            PROMPT="You are working on issue #${{ steps.determine_context.outputs.issue_number }}.
+            
+            Please fetch the issue details and implement the requested changes.
+            Work in the branch: ${{ steps.determine_context.outputs.branch_name }}
+            
+            After implementing changes:
+            1. Commit your changes with descriptive messages
+            2. Provide a summary of what you've done"
+            ;;
+          
+          "comment"|"review")
+            if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
+              COMMENT_BODY=$(echo '${{ github.event.comment.body }}' | sed "s/${{ inputs.trigger_phrase }}//g")
+              COMMENT_AUTHOR="${{ github.event.comment.user.login }}"
+            else
+              COMMENT_BODY=$(echo '${{ github.event.review.body }}' | sed "s/${{ inputs.trigger_phrase }}//g")
+              COMMENT_AUTHOR="${{ github.event.review.user.login }}"
+            fi
+            
+            PROMPT="A comment was posted by @${COMMENT_AUTHOR}:
+            
+            ${COMMENT_BODY}
+            
+            Please respond to this comment and implement any requested changes.
+            Work in the existing branch: ${{ steps.determine_context.outputs.branch_name }}"
+            ;;
+        esac
+        
+        # Add custom instructions if provided
+        if [[ -n "${{ inputs.custom_instructions }}" ]]; then
+          PROMPT="${PROMPT}
+          
+          Additional instructions:
+          ${{ inputs.custom_instructions }}"
+        fi
+        
+        # Save prompt to file
+        echo "$PROMPT" > /tmp/claude_prompt.txt
+        echo "prompt_file=/tmp/claude_prompt.txt" >> $GITHUB_OUTPUT
+
+    - name: Prepare OAuth credentials
+      if: steps.check_triggers.outputs.should_run == 'true' && inputs.use_oauth == 'true'
+      shell: bash
+      env:
+        USE_OAUTH: ${{ inputs.use_oauth }}
+        CLAUDE_ACCESS_TOKEN: ${{ inputs.claude_access_token }}
+        CLAUDE_REFRESH_TOKEN: ${{ inputs.claude_refresh_token }}
+        CLAUDE_EXPIRES_AT: ${{ inputs.claude_expires_at }}
+      run: |
+        # Делаем скрипт исполняемым
+        chmod +x ${{ github.action_path }}/scripts/prepare-oauth.sh
+        # Запускаем подготовку OAuth
+        ${{ github.action_path }}/scripts/prepare-oauth.sh
+
+    - name: Run Claude Code
+      id: claude
+      if: steps.check_triggers.outputs.should_run == 'true'
+      uses: anthropics/claude-code-base-action@beta
+      with:
+        prompt_file: ${{ steps.prepare_prompt.outputs.prompt_file }}
+        model: ${{ inputs.model }}
+        anthropic_api_key: ${{ inputs.use_oauth == 'true' && '' || inputs.anthropic_api_key }}
+        use_bedrock: ${{ inputs.use_bedrock }}
+        use_vertex: ${{ inputs.use_vertex }}
+        github_token: ${{ inputs.github_token }}
+        max_turns: ${{ inputs.max_turns }}
+        timeout_minutes: ${{ inputs.timeout_minutes }}
+        allowed_tools: ${{ inputs.allowed_tools }}
+        claude_env: ${{ inputs.claude_env }}
+        
+    - name: Post completion comment
+      if: steps.check_triggers.outputs.should_run == 'true' && success()
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github_token }}
+        script: |
+          const issueOrPrNumber = '${{ steps.determine_context.outputs.pr_number }}' || '${{ steps.determine_context.outputs.issue_number }}';
+          const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+          
+          if (issueOrPrNumber) {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: parseInt(issueOrPrNumber),
+              body: `✅ Claude has completed the task!\n\n[View workflow run](${runUrl})`
+            });
+          }
+          
+    - name: Handle errors
+      if: steps.check_triggers.outputs.should_run == 'true' && failure()
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github_token }}
+        script: |
+          const issueOrPrNumber = '${{ steps.determine_context.outputs.pr_number }}' || '${{ steps.determine_context.outputs.issue_number }}';
+          const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+          
+          if (issueOrPrNumber) {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: parseInt(issueOrPrNumber),
+              body: `❌ Claude encountered an error. Please check the [workflow logs](${runUrl}) for details.`
+            });
+          }

@@ -1,0 +1,302 @@
+# Примеры workflow для Claude Copilot Action
+
+## OAuth с Claude Max подпиской
+
+```yaml
+name: Claude with OAuth
+on:
+  issue_comment:
+    types: [created]
+  issues:
+    types: [labeled]
+
+jobs:
+  claude-oauth:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: your-org/claude-copilot-action@v1
+        with:
+          use_oauth: true
+          claude_access_token: ${{ secrets.CLAUDE_ACCESS_TOKEN }}
+          claude_refresh_token: ${{ secrets.CLAUDE_REFRESH_TOKEN }}
+          claude_expires_at: ${{ secrets.CLAUDE_EXPIRES_AT }}
+          # OAuth автоматически использует вашу подписку Claude Max
+          # Не нужен anthropic_api_key
+```
+
+## Минимальная конфигурация
+
+```yaml
+name: Claude Assistant
+on:
+  issue_comment:
+    types: [created]
+  issues:
+    types: [labeled]
+
+jobs:
+  claude:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: your-org/claude-copilot-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+## Полная конфигурация
+
+```yaml
+name: Claude Development Assistant
+on:
+  # Реагируем на комментарии в issues и PR
+  issue_comment:
+    types: [created]
+  
+  # Реагируем на review комментарии
+  pull_request_review_comment:
+    types: [created]
+  
+  # Реагируем на создание review
+  pull_request_review:
+    types: [submitted]
+  
+  # Реагируем на issues
+  issues:
+    types: [opened, assigned, labeled]
+  
+  # Реагируем на создание PR (для webhook интеграции)
+  pull_request:
+    types: [opened]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write  # Для OIDC
+
+jobs:
+  claude-assistant:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: your-org/claude-copilot-action@v1
+        with:
+          # Аутентификация
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          
+          # Триггеры
+          trigger_phrase: "@claude"
+          label_trigger: "ai-task"
+          assignee_trigger: "claude-bot"
+          
+          # Настройки модели
+          model: "claude-3-5-sonnet-20241022"
+          max_turns: "25"
+          timeout_minutes: "45"
+          
+          # Инструменты
+          allowed_tools: |
+            Bash(git:*),
+            Bash(npm:*),
+            Bash(yarn:*),
+            Bash(python:*),
+            Bash(make:*),
+            View,
+            Edit,
+            GlobTool,
+            GrepTool,
+            BatchTool,
+            mcp__github_file_ops__read_file,
+            mcp__github_file_ops__commit_files,
+            mcp__github_file_ops__update_claude_comment,
+            mcp__github_file_ops__get_issue,
+            mcp__github_file_ops__get_pull_request
+          
+          # Инструкции
+          custom_instructions: |
+            - Follow the project's coding standards
+            - Always write tests for new features
+            - Use meaningful commit messages
+            - Update documentation when needed
+          
+          # Переменные окружения
+          claude_env: |
+            NODE_ENV: development
+            PYTHON_VERSION: 3.11
+            ENABLE_DEBUG: true
+          
+          # Настройки веток
+          base_branch: "main"
+          branch_prefix: "feature/claude-"
+```
+
+## Конфигурация для TypeScript проекта
+
+```yaml
+name: Claude TypeScript Assistant
+on:
+  issue_comment:
+    types: [created]
+  issues:
+    types: [labeled]
+
+jobs:
+  claude-ts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: your-org/claude-copilot-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          
+          allowed_tools: |
+            Bash(git:*),
+            Bash(npm:*),
+            Bash(npx:*),
+            Bash(tsc:*),
+            Bash(eslint:*),
+            View,
+            Edit,
+            GlobTool,
+            GrepTool,
+            BatchTool
+          
+          custom_instructions: |
+            - Use TypeScript with strict mode
+            - Follow ESLint rules
+            - Add JSDoc comments for public APIs
+            - Run 'npm test' before committing
+            - Use async/await instead of promises
+```
+
+## Конфигурация для Python проекта
+
+```yaml
+name: Claude Python Assistant
+on:
+  issue_comment:
+    types: [created]
+  issues:
+    types: [labeled]
+
+jobs:
+  claude-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: your-org/claude-copilot-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          
+          allowed_tools: |
+            Bash(git:*),
+            Bash(python:*),
+            Bash(pip:*),
+            Bash(pytest:*),
+            Bash(black:*),
+            Bash(mypy:*),
+            View,
+            Edit,
+            GlobTool,
+            GrepTool,
+            BatchTool
+          
+          custom_instructions: |
+            - Follow PEP 8 style guide
+            - Use type hints
+            - Write docstrings for all functions
+            - Run black formatter before committing
+            - Add unit tests using pytest
+```
+
+## AWS Bedrock конфигурация
+
+```yaml
+name: Claude via Bedrock
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write  # Required for OIDC
+
+jobs:
+  claude-bedrock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/GitHubActionsRole
+          aws-region: us-east-1
+          
+      - uses: your-org/claude-copilot-action@v1
+        with:
+          use_bedrock: true
+          model: "anthropic.claude-3-5-sonnet-20241022-v2:0"
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+## Workflow с условиями
+
+```yaml
+name: Conditional Claude
+on:
+  issue_comment:
+    types: [created]
+  issues:
+    types: [labeled]
+
+jobs:
+  claude:
+    runs-on: ubuntu-latest
+    # Запускаем только для определенных лейблов или авторов
+    if: |
+      (github.event_name == 'issues' && github.event.label.name == 'claude') ||
+      (github.event_name == 'issue_comment' && 
+       contains(github.event.comment.body, '@claude') &&
+       github.event.comment.author_association == 'MEMBER')
+    
+    steps:
+      - uses: your-org/claude-copilot-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+## Интеграция с существующим CI/CD
+
+```yaml
+name: Development Workflow
+on:
+  pull_request:
+  issue_comment:
+    types: [created]
+
+jobs:
+  # Обычные CI проверки
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm install
+      - run: npm test
+  
+  # Claude assistant работает параллельно
+  claude:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'issue_comment' && 
+      contains(github.event.comment.body, '@claude')
+    steps:
+      - uses: your-org/claude-copilot-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+  
+  # Deploy только после всех проверок
+  deploy:
+    needs: [test]
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Deploying..."
+```

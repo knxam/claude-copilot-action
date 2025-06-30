@@ -1,0 +1,29 @@
+# Переменные окружения
+.env
+.env.test
+.env.local
+
+# Логи
+*.log
+logs/
+
+# Временные файлы
+tmp/
+temp/
+*.tmp
+
+# act артефакты
+.act/
+
+# Node.js
+node_modules/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
