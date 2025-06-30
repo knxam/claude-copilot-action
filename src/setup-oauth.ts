@@ -15,9 +15,9 @@ export async function setupOAuth(): Promise<void> {
 
   // Set OAuth environment variables
   process.env.USE_OAUTH = 'true';
-  process.env.CLAUDE_ACCESS_TOKEN = process.env.INPUT_CLAUDE_ACCESS_TOKEN;
-  process.env.CLAUDE_REFRESH_TOKEN = process.env.INPUT_CLAUDE_REFRESH_TOKEN;
-  process.env.CLAUDE_EXPIRES_AT = process.env.INPUT_CLAUDE_EXPIRES_AT;
+  // process.env.CLAUDE_ACCESS_TOKEN = process.env.INPUT_CLAUDE_ACCESS_TOKEN;
+  // process.env.CLAUDE_REFRESH_TOKEN = process.env.INPUT_CLAUDE_REFRESH_TOKEN;
+  // process.env.CLAUDE_EXPIRES_AT = process.env.INPUT_CLAUDE_EXPIRES_AT;
 
   try {
     execSync(`bash ${scriptPath}`, { 

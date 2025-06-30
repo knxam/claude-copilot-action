@@ -11,12 +11,17 @@ logs/
 tmp/
 temp/
 *.tmp
+output.txt
+claude-execution-output.json
 
 # act артефакты
 .act/
 
 # Node.js
 node_modules/
+
+# Build артефакты (больше не нужны с Bun)
+dist/
 
 # IDE
 .vscode/
