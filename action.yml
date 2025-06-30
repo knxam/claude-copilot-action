@@ -193,6 +193,7 @@ runs:
           # Extract issue number from PR body if it's from webhook
           if [[ "${{ steps.check_triggers.outputs.trigger_type }}" == "webhook_pr" ]]; then
             ISSUE_NUMBER=$(echo "${{ github.event.pull_request.body }}" | grep -oP 'issue #\K\d+' || echo "")
+            IS_NEW_TASK="false"  # PR уже создан вебхуком
           fi
         elif [[ "${{ github.event_name }}" == "issue_comment" ]] || [[ "${{ github.event_name }}" == "pull_request_review_comment" ]]; then
           if [[ -n "${{ github.event.issue.pull_request }}" ]]; then
@@ -212,14 +213,14 @@ runs:
 
     - name: Create branch and PR (if needed)
       id: create_pr
-      if: steps.check_triggers.outputs.should_run == 'true' && steps.determine_context.outputs.is_new_task == 'true'
+      if: steps.check_triggers.outputs.should_run == 'true' && steps.determine_context.outputs.is_new_task == 'true' && steps.check_triggers.outputs.trigger_type != 'webhook_pr'
       uses: actions/github-script@v7
       with:
         github-token: ${{ inputs.github_token }}
         script: |
           const issueNumber = '${{ steps.determine_context.outputs.issue_number }}';
           const branchName = '${{ steps.determine_context.outputs.branch_name }}';
-          const baseBranch = '${{ inputs.base_branch }}' || github.context.payload.repository.default_branch;
+          const baseBranch = '${{ inputs.base_branch }}' || context.payload.repository.default_branch;
           
           console.log(`📝 Creating branch and PR for issue #${issueNumber}`);
           
@@ -271,11 +272,18 @@ runs:
               force: true
             });
             
+            // Get issue title
+            const { data: issue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: parseInt(issueNumber)
+            });
+            
             // Create PR
             const { data: pr } = await github.rest.pulls.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `Claude working on: ${context.payload.issue.title}`,
+              title: `Claude working on: ${issue.title}`,
               head: branchName,
               base: baseBranch,
               body: `🤖 This PR was automatically created by Claude in response to issue #${issueNumber}\n\nClaude is working on implementing the requested changes.`
@@ -288,6 +296,23 @@ runs:
             console.error('Error creating branch/PR:', error);
             throw error;
           }
+
+    - name: Add eyes reaction (for webhook PR)
+      if: steps.check_triggers.outputs.should_run == 'true' && steps.check_triggers.outputs.trigger_type == 'webhook_pr'
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github_token }}
+        script: |
+          const prNumber = '${{ github.event.pull_request.number }}';
+          console.log(`👀 Adding eyes reaction to PR #${prNumber} created by webhook`);
+          
+          // Комментарий в PR о начале работы
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: parseInt(prNumber),
+            body: '👀 Claude is starting work on this task...'
+          });
 
     - name: Checkout repository
       if: steps.check_triggers.outputs.should_run == 'true'
