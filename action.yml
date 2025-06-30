@@ -298,36 +298,54 @@ runs:
         echo "$PROMPT" > /tmp/claude_prompt.txt
         echo "prompt_file=/tmp/claude_prompt.txt" >> $GITHUB_OUTPUT
 
-    - name: Prepare OAuth credentials
-      if: steps.check_triggers.outputs.should_run == 'true' && inputs.use_oauth == 'true'
-      shell: bash
-      env:
-        USE_OAUTH: ${{ inputs.use_oauth }}
-        CLAUDE_ACCESS_TOKEN: ${{ inputs.claude_access_token }}
-        CLAUDE_REFRESH_TOKEN: ${{ inputs.claude_refresh_token }}
-        CLAUDE_EXPIRES_AT: ${{ inputs.claude_expires_at }}
-      run: |
-        # Делаем скрипт исполняемым
-        chmod +x ${{ github.action_path }}/scripts/prepare-oauth.sh
-        # Запускаем подготовку OAuth
-        ${{ github.action_path }}/scripts/prepare-oauth.sh
+    - name: Setup Node.js
+      if: steps.check_triggers.outputs.should_run == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18.x'
 
+    - name: Install Bun
+      if: steps.check_triggers.outputs.should_run == 'true'
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: 1.2.11
+
+    - name: Install Dependencies
+      if: steps.check_triggers.outputs.should_run == 'true'
+      shell: bash
+      run: |
+        cd ${GITHUB_ACTION_PATH}
+        bun install
+        
+    - name: Install Claude Code
+      if: steps.check_triggers.outputs.should_run == 'true'
+      shell: bash
+      run: |
+        npm install -g @anthropic-ai/claude-code@latest
+        
     - name: Run Claude Code
       id: claude
       if: steps.check_triggers.outputs.should_run == 'true'
-      uses: anthropics/claude-code-base-action@beta
-      with:
-        prompt_file: ${{ steps.prepare_prompt.outputs.prompt_file }}
-        model: ${{ inputs.model }}
-        anthropic_api_key: ${{ inputs.use_oauth == 'true' && 'oauth-placeholder' || inputs.anthropic_api_key }}
-        use_bedrock: ${{ inputs.use_bedrock }}
-        use_vertex: ${{ inputs.use_vertex }}
-        max_turns: ${{ inputs.max_turns }}
-        timeout_minutes: ${{ inputs.timeout_minutes }}
-        allowed_tools: ${{ inputs.allowed_tools }}
-        claude_env: ${{ inputs.claude_env }}
+      shell: bash
       env:
-        ANTHROPIC_API_KEY: ${{ inputs.use_oauth == 'true' && 'oauth-placeholder' || inputs.anthropic_api_key }}
+        # Pass all inputs as environment variables
+        CLAUDE_CODE_ACTION: "1"
+        INPUT_PROMPT_FILE: ${{ steps.prepare_prompt.outputs.prompt_file }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+        INPUT_USE_OAUTH: ${{ inputs.use_oauth }}
+        INPUT_CLAUDE_ACCESS_TOKEN: ${{ inputs.claude_access_token }}
+        INPUT_CLAUDE_REFRESH_TOKEN: ${{ inputs.claude_refresh_token }}
+        INPUT_CLAUDE_EXPIRES_AT: ${{ inputs.claude_expires_at }}
+        INPUT_USE_BEDROCK: ${{ inputs.use_bedrock }}
+        INPUT_USE_VERTEX: ${{ inputs.use_vertex }}
+        INPUT_MAX_TURNS: ${{ inputs.max_turns }}
+        INPUT_TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
+        INPUT_ALLOWED_TOOLS: ${{ inputs.allowed_tools }}
+        INPUT_CLAUDE_ENV: ${{ inputs.claude_env }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        bun run ${GITHUB_ACTION_PATH}/src/index.ts
         
     - name: Post completion comment
       if: steps.check_triggers.outputs.should_run == 'true' && success()
