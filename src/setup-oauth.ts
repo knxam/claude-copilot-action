@@ -92,6 +92,17 @@ async function performRefresh(refreshToken: string): Promise<{ accessToken: stri
     } else {
       const errorBody = await response.text();
       core.error(`Token refresh failed: ${response.status} - ${errorBody}`);
+      
+      // Parse error response if possible
+      try {
+        const errorData = JSON.parse(errorBody);
+        if (errorData.error === 'invalid_grant') {
+          core.error('Refresh token is invalid or expired. You need to login again.');
+        }
+      } catch {
+        // Ignore parsing errors
+      }
+      
       return null;
     }
   } catch (error) {
@@ -177,6 +188,22 @@ export async function setupOAuth(): Promise<void> {
         updateGitHubSecrets(credentials.secretsAdminPat, accessToken, refreshToken, expiresAt);
       } else {
         core.error('Failed to refresh token, using existing credentials');
+        core.error(`
+❌ Token refresh failed. This usually means:
+   1. The refresh token has expired (they typically last 30-60 days)
+   2. You've logged in elsewhere and the refresh token was revoked
+   3. The refresh token in your secrets is incorrect
+
+To fix this:
+1. Run 'claude' locally
+2. Execute '/login' to get new tokens
+3. Update all three secrets in GitHub:
+   - CLAUDE_ACCESS_TOKEN
+   - CLAUDE_REFRESH_TOKEN  
+   - CLAUDE_EXPIRES_AT
+
+The action will continue with the expired token, but may fail.
+`);
       }
     }
   } else {
