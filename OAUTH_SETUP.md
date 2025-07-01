@@ -95,10 +95,43 @@ jobs:
 
 ## Обновление токенов
 
-OAuth токены обычно действительны около месяца. Когда они истекут:
+OAuth токены обычно действительны около месяца. У вас есть два варианта:
+
+### Вариант 1: Ручное обновление
 
 1. Запустите `claude` и выполните `/login` снова
 2. Получите новые токены из `~/.claude/.credentials.json`
+3. Обновите секреты в GitHub
+
+### Вариант 2: Автоматическое обновление (рекомендуется)
+
+Action может автоматически обновлять токены за вас!
+
+#### Настройка автоматического обновления:
+
+1. **Создайте Personal Access Token (PAT)**
+   - Перейдите в GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
+   - Нажмите "Generate new token (classic)"
+   - Дайте токену имя, например "Claude OAuth Refresh"
+   - Выберите только разрешение: `repo` (для доступа к секретам)
+   - Создайте токен и сохраните его
+
+2. **Добавьте PAT как секрет**
+   - Имя: `SECRETS_ADMIN_PAT`
+   - Значение: (ваш PAT)
+
+3. **Обновите workflow**
+   ```yaml
+   - uses: your-org/claude-copilot-action@v1
+     with:
+       use_oauth: true
+       claude_access_token: ${{ secrets.CLAUDE_ACCESS_TOKEN }}
+       claude_refresh_token: ${{ secrets.CLAUDE_REFRESH_TOKEN }}
+       claude_expires_at: ${{ secrets.CLAUDE_EXPIRES_AT }}
+       secrets_admin_pat: ${{ secrets.SECRETS_ADMIN_PAT }}
+   ```
+
+Теперь токены будут автоматически обновляться, когда истечёт их срок действия!
 3. Обновите секреты в GitHub
 
 ## Автоматизация обновления токенов

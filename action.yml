@@ -28,6 +28,10 @@ inputs:
     description: 'Claude AI OAuth token expiration timestamp (required when use_oauth is true)'
     required: false
   
+  secrets_admin_pat:
+    description: 'Personal Access Token with secrets:write permission to refresh OAuth tokens automatically'
+    required: false
+  
   github_token:
     description: 'GitHub token with repo and pull request permissions'
     required: false
@@ -337,6 +341,7 @@ runs:
         INPUT_CLAUDE_ACCESS_TOKEN: ${{ inputs.claude_access_token }}
         INPUT_CLAUDE_REFRESH_TOKEN: ${{ inputs.claude_refresh_token }}
         INPUT_CLAUDE_EXPIRES_AT: ${{ inputs.claude_expires_at }}
+        INPUT_SECRETS_ADMIN_PAT: ${{ inputs.secrets_admin_pat }}
         INPUT_USE_BEDROCK: ${{ inputs.use_bedrock }}
         INPUT_USE_VERTEX: ${{ inputs.use_vertex }}
         INPUT_MAX_TURNS: ${{ inputs.max_turns }}
