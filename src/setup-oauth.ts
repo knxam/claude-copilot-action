@@ -9,7 +9,7 @@ const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 interface OAuthCredentials {
   accessToken: string;
   refreshToken: string;
-  expiresAt: string;
+  expiresAt: string | number; // Может быть и строкой (из секрета) и числом
   secretsAdminPat?: string;
 }
 
@@ -20,16 +20,48 @@ interface TokenRefreshResponse {
   scope?: string;
 }
 
-function tokenExpired(expiresAt: string): boolean {
+function tokenExpired(expiresAt: string | number): boolean {
   // Add 60 minutes buffer to refresh before actual expiry
   const bufferMs = 60 * 60 * 1000;
-  const expiresAtDate = new Date(expiresAt);
-  const currentTime = new Date();
-  return currentTime.getTime() >= (expiresAtDate.getTime() - bufferMs);
+  
+  try {
+    let expiresAtMs: number;
+    
+    if (typeof expiresAt === 'number') {
+      // Already a timestamp in milliseconds
+      expiresAtMs = expiresAt;
+    } else if (typeof expiresAt === 'string') {
+      // Try to parse as number first (timestamp)
+      const timestamp = parseInt(expiresAt);
+      if (!isNaN(timestamp)) {
+        expiresAtMs = timestamp;
+      } else {
+        // Try to parse as ISO date string
+        const expiresAtDate = new Date(expiresAt);
+        if (!isNaN(expiresAtDate.getTime())) {
+          expiresAtMs = expiresAtDate.getTime();
+        } else {
+          core.warning(`Unable to parse expiresAt date: ${expiresAt}`);
+          return true;
+        }
+      }
+    } else {
+      core.warning(`Invalid expiresAt type: ${typeof expiresAt}`);
+      return true;
+    }
+    
+    const currentTime = Date.now();
+    return currentTime >= (expiresAtMs - bufferMs);
+  } catch (error) {
+    core.warning(`Error parsing expiresAt date: ${error}`);
+    return true;
+  }
 }
 
-async function performRefresh(refreshToken: string): Promise<{ accessToken: string; refreshToken: string; expiresAt: string } | null> {
+async function performRefresh(refreshToken: string): Promise<{ accessToken: string; refreshToken: string; expiresAt: number } | null> {
   try {
+    core.info(`Attempting to refresh token using refresh token: ${refreshToken.substring(0, 10)}...`);
+    
     const response = await fetch(OAUTH_TOKEN_URL, {
       method: 'POST',
       headers: {
@@ -42,16 +74,20 @@ async function performRefresh(refreshToken: string): Promise<{ accessToken: stri
       }),
     });
 
+    core.info(`Refresh response status: ${response.status}`);
+
     if (response.ok) {
       const data = await response.json() as TokenRefreshResponse;
       
-      // Calculate expiration date
-      const expiresAt = new Date(Date.now() + data.expires_in * 1000);
+      // Calculate expiration timestamp in milliseconds
+      const expiresAt = Date.now() + (data.expires_in * 1000);
+      
+      core.info(`Token refreshed successfully. New expiration: ${new Date(expiresAt).toISOString()}`);
       
       return {
         accessToken: data.access_token,
         refreshToken: data.refresh_token,
-        expiresAt: expiresAt.toISOString(),
+        expiresAt: expiresAt,
       };
     } else {
       const errorBody = await response.text();
@@ -64,7 +100,7 @@ async function performRefresh(refreshToken: string): Promise<{ accessToken: stri
   }
 }
 
-function updateGitHubSecrets(secretsAdminPat: string, accessToken: string, refreshToken: string, expiresAt: string) {
+function updateGitHubSecrets(secretsAdminPat: string, accessToken: string, refreshToken: string, expiresAt: string | number) {
   const env = { ...process.env, GH_TOKEN: secretsAdminPat };
   
   try {
@@ -76,7 +112,7 @@ function updateGitHubSecrets(secretsAdminPat: string, accessToken: string, refre
     execSync(`gh secret set CLAUDE_REFRESH_TOKEN --body "${refreshToken}"`, { env, stdio: 'inherit' });
     core.info('✅ Updated CLAUDE_REFRESH_TOKEN secret');
     
-    // Update CLAUDE_EXPIRES_AT
+    // Update CLAUDE_EXPIRES_AT (as string)
     execSync(`gh secret set CLAUDE_EXPIRES_AT --body "${expiresAt}"`, { env, stdio: 'inherit' });
     core.info('✅ Updated CLAUDE_EXPIRES_AT secret');
   } catch (error) {
@@ -95,6 +131,9 @@ export async function setupOAuth(): Promise<void> {
     secretsAdminPat: process.env.INPUT_SECRETS_ADMIN_PAT,
   };
 
+  // Debug log
+  core.debug(`expiresAt value: ${credentials.expiresAt}`);
+
   // Prepare OAuth script path
   const scriptPath = path.join(__dirname, "..", "scripts", "prepare-oauth.sh");
   
@@ -104,7 +143,7 @@ export async function setupOAuth(): Promise<void> {
 
   let accessToken = credentials.accessToken;
   let refreshToken = credentials.refreshToken;
-  let expiresAt = credentials.expiresAt;
+  let expiresAt: string | number = credentials.expiresAt;
 
   // Check if token needs refresh
   if (tokenExpired(expiresAt)) {
@@ -141,16 +180,27 @@ export async function setupOAuth(): Promise<void> {
       }
     }
   } else {
-    const expiresAtDate = new Date(expiresAt);
-    const minutesUntilExpiry = Math.round((expiresAtDate.getTime() - Date.now()) / 1000 / 60);
-    core.info(`✅ Token is still valid (expires in ${minutesUntilExpiry} minutes)`);
+    // Parse expiresAt to get milliseconds
+    let expiresAtMs: number;
+    if (typeof expiresAt === 'number') {
+      expiresAtMs = expiresAt;
+    } else {
+      expiresAtMs = parseInt(expiresAt);
+    }
+    
+    if (!isNaN(expiresAtMs)) {
+      const minutesUntilExpiry = Math.round((expiresAtMs - Date.now()) / 1000 / 60);
+      core.info(`✅ Token is still valid (expires in ${minutesUntilExpiry} minutes)`);
+    } else {
+      core.warning(`Invalid expiresAt format: ${expiresAt}`);
+    }
   }
 
   // Set OAuth environment variables for the script
   process.env.USE_OAUTH = 'true';
   process.env.CLAUDE_ACCESS_TOKEN = accessToken;
   process.env.CLAUDE_REFRESH_TOKEN = refreshToken;
-  process.env.CLAUDE_EXPIRES_AT = expiresAt;
+  process.env.CLAUDE_EXPIRES_AT = String(expiresAt); // Всегда передаем как строку
 
   try {
     execSync(`bash ${scriptPath}`, { 
